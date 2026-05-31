@@ -1,0 +1,7 @@
+/vcdiff
+/vcdiff.exe
+/dist/
+*.vcdiff
+cover.out
+cover-pkg.out
+cover.txt

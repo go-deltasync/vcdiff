@@ -1,0 +1,39 @@
+name: compat
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: cross-impl compat (linux / Google open-vcdiff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          check-latest: true
+
+      - name: Build upstream open-vcdiff
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ git
+          git clone --depth 1 https://github.com/google/open-vcdiff.git /tmp/open-vcdiff
+          cmake -S /tmp/open-vcdiff -B /tmp/open-vcdiff/build
+          cmake --build /tmp/open-vcdiff/build --target vcdiff -j"$(nproc)"
+          # Expose the `vcdiff` binary on PATH; the compat tests skip if absent.
+          echo "/tmp/open-vcdiff/build" >> "$GITHUB_PATH"
+          /tmp/open-vcdiff/build/vcdiff --help 2>&1 | head -n 1 || true
+
+      - name: Compat tests
+        run: go test -v -tags=compat ./internal/vcdiff/...
