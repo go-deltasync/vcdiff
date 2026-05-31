@@ -23,13 +23,21 @@ jobs:
           go-version: "1.23"
           check-latest: true
 
+      # Best-effort: a failure here leaves the job green and the compat tests
+      # skip (the `vcdiff` binary is simply absent from PATH).
       - name: Build upstream open-vcdiff
+        continue-on-error: true
         run: |
           set -eu
           sudo apt-get update
           sudo apt-get install -y cmake g++ git
-          git clone --depth 1 https://github.com/google/open-vcdiff.git /tmp/open-vcdiff
-          cmake -S /tmp/open-vcdiff -B /tmp/open-vcdiff/build
+          # --recurse-submodules pulls third_party/gflags, which the `vcdiff`
+          # executable links against. CMAKE_POLICY_VERSION_MINIMUM lets newer
+          # CMake configure open-vcdiff's pre-3.5 cmake_minimum_required.
+          git clone --depth 1 --recurse-submodules \
+            https://github.com/google/open-vcdiff.git /tmp/open-vcdiff
+          cmake -S /tmp/open-vcdiff -B /tmp/open-vcdiff/build \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build /tmp/open-vcdiff/build --target vcdiff -j"$(nproc)"
           # Expose the `vcdiff` binary on PATH; the compat tests skip if absent.
           echo "/tmp/open-vcdiff/build" >> "$GITHUB_PATH"
