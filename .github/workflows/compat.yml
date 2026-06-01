@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   compat:
-    name: cross-impl compat (linux / Google open-vcdiff)
+    name: cross-impl compat (linux / xdelta3)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -23,25 +23,17 @@ jobs:
           go-version: "1.23"
           check-latest: true
 
-      # Best-effort: a failure here leaves the job green and the compat tests
-      # skip (the `vcdiff` binary is simply absent from PATH).
-      - name: Build upstream open-vcdiff
+      # xdelta3 is the actively maintained reference VCDIFF (RFC 3284)
+      # implementation (open-vcdiff is archived). It is packaged by Ubuntu, so
+      # no source build is needed. Best-effort: a failure here leaves the job
+      # green and the compat tests skip (the `xdelta3` binary is absent).
+      - name: Install xdelta3
         continue-on-error: true
         run: |
           set -eu
           sudo apt-get update
-          sudo apt-get install -y cmake g++ git
-          # --recurse-submodules pulls third_party/gflags, which the `vcdiff`
-          # executable links against. CMAKE_POLICY_VERSION_MINIMUM lets newer
-          # CMake configure open-vcdiff's pre-3.5 cmake_minimum_required.
-          git clone --depth 1 --recurse-submodules \
-            https://github.com/google/open-vcdiff.git /tmp/open-vcdiff
-          cmake -S /tmp/open-vcdiff -B /tmp/open-vcdiff/build \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build /tmp/open-vcdiff/build --target vcdiff -j"$(nproc)"
-          # Expose the `vcdiff` binary on PATH; the compat tests skip if absent.
-          echo "/tmp/open-vcdiff/build" >> "$GITHUB_PATH"
-          /tmp/open-vcdiff/build/vcdiff --help 2>&1 | head -n 1 || true
+          sudo apt-get install -y xdelta3
+          xdelta3 -V 2>&1 | head -n 1 || true
 
       - name: Compat tests
         run: go test -v -tags=compat ./internal/vcdiff/...

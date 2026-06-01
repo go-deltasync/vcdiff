@@ -38,11 +38,23 @@ func encodeWindow(source, target []byte) []byte {
 	sLen := len(source)
 	n := len(u)
 
-	index := make(map[uint32][]int)
+	// Match index, zlib-style: head[hash(seed)] is the newest position with that
+	// hash and prev[pos] chains to the previous one. This replaces a
+	// map[uint32][]int (one allocation per position) with two flat slices, which
+	// is far faster while producing identical output — chains are walked
+	// newest-first and capped at maxChain exact-seed matches, exactly as before
+	// (hash collisions are skipped via the seed comparison in findMatch).
+	bits := hashChainBits(n)
+	head := make([]int32, 1<<bits)
+	for i := range head {
+		head[i] = -1
+	}
+	prev := make([]int32, n)
 	indexAt := func(pos int) {
 		if pos+minMatch <= n {
-			h := binary.LittleEndian.Uint32(u[pos : pos+minMatch])
-			index[h] = append(index[h], pos)
+			h := seedHash(binary.LittleEndian.Uint32(u[pos:pos+minMatch]), bits)
+			prev[pos] = head[h]
+			head[h] = int32(pos)
 		}
 	}
 	for p := 0; p < sLen; p++ {
@@ -63,7 +75,7 @@ func encodeWindow(source, target []byte) []byte {
 
 	i := sLen
 	for i < n {
-		if mLen, mPos := findMatch(u, index, i, n); mLen >= minMatch {
+		if mLen, mPos := findMatch(u, head, prev, bits, i, n, sLen); mLen >= minMatch {
 			flush(i)
 			enc := cache.encode(mPos, i)
 			instS = append(instS, opcodeCOPY0(enc.mode))
@@ -96,28 +108,61 @@ func encodeWindow(source, target []byte) []byte {
 	return assembleWindow(sLen, len(target), dataS, instS, addrS)
 }
 
+// hashChainBits picks a power-of-two hash-table size roughly matching the input
+// length (capped), keeping collision chains short without wasting memory on
+// small inputs. It only affects bucketing/speed, never the encoded output.
+func hashChainBits(n int) uint {
+	bits := uint(8)
+	for (1 << bits) < n && bits < 21 {
+		bits++
+	}
+	return bits
+}
+
+// seedHash maps a 4-byte seed to a hash-table bucket (Knuth multiplicative hash,
+// high bits).
+func seedHash(seed uint32, bits uint) uint32 {
+	return (seed * 2654435761) >> (32 - bits)
+}
+
 // findMatch returns the longest match (length, U-position) for the seed at i,
-// or (0, -1) if none reaches minMatch's seed length. Candidates are inspected
-// newest-first, capped at maxChain.
-func findMatch(u []byte, index map[uint32][]int, i, n int) (int, int) {
+// or (0, -1) if none reaches minMatch's seed length. The hash chain is walked
+// newest-first; hash collisions (a different seed in the same bucket) are
+// skipped, and at most maxChain exact-seed candidates are inspected.
+func findMatch(u []byte, head, prev []int32, bits uint, i, n, sLen int) (int, int) {
 	if i+minMatch > n {
 		return 0, -1
 	}
-	chain := index[binary.LittleEndian.Uint32(u[i:i+minMatch])]
+	seed := binary.LittleEndian.Uint32(u[i : i+minMatch])
 	bestLen, bestPos := 0, -1
-	for c := len(chain) - 1; c >= 0 && len(chain)-1-c < maxChain; c-- {
-		if l := matchLen(u, chain[c], i, n); l > bestLen {
-			bestLen, bestPos = l, chain[c]
+	count := 0
+	for p := head[seedHash(seed, bits)]; p >= 0 && count < maxChain; p = prev[p] {
+		pos := int(p)
+		if binary.LittleEndian.Uint32(u[pos:pos+minMatch]) != seed {
+			continue // hash collision: different seed in this bucket
+		}
+		count++
+		if l := matchLen(u, pos, i, n, sLen); l > bestLen {
+			bestLen, bestPos = l, pos
 		}
 	}
 	return bestLen, bestPos
 }
 
 // matchLen returns how many bytes of u match starting at p versus i (p < i),
-// stopping at the end of u. Forward overlap is intentional.
-func matchLen(u []byte, p, i, n int) int {
+// stopping at the end of u. A match that begins in the source window is capped
+// at the source/target boundary: COPY addresses that start in the source must
+// stay within it, because xdelta3 (the reference decoder) reads a source-window
+// copy from the source buffer and rejects one that runs past its end. Matches
+// that begin in the target window may overlap forward freely (the standard
+// run-length self-reference), which xdelta3 supports.
+func matchLen(u []byte, p, i, n, sLen int) int {
+	limit := n
+	if p < sLen {
+		limit = sLen
+	}
 	l := 0
-	for i+l < n && u[p+l] == u[i+l] {
+	for i+l < n && p+l < limit && u[p+l] == u[i+l] {
 		l++
 	}
 	return l
