@@ -12,45 +12,90 @@ const (
 	maxChain     = 32 // cap on hash-chain candidates inspected per position
 )
 
-// EncodeBytes returns a VCDIFF delta that reconstructs target from source.
-// A nil/empty source produces a self-referential ("pure compression") delta.
-func EncodeBytes(source, target []byte) []byte {
+// Encoder reuses its internal buffers across calls to avoid per-call
+// allocation. Use it to encode many source/target pairs in one process (batch
+// or server workloads); for a one-off delta the package-level Encode /
+// EncodeBytes are simpler. An Encoder must not be used concurrently.
+type Encoder struct {
+	u    []byte  // U = source ‖ target
+	head []int32 // hash bucket -> newest position
+	prev []int32 // position -> previous position in the same bucket
+}
+
+// NewEncoder returns a reusable Encoder.
+func NewEncoder() *Encoder { return &Encoder{} }
+
+// EncodeBytes returns a VCDIFF delta that reconstructs target from source,
+// reusing the Encoder's buffers. A nil/empty source produces a self-referential
+// ("pure compression") delta.
+func (e *Encoder) EncodeBytes(source, target []byte) []byte {
 	out := appendHeader(nil)
 	if len(target) > 0 {
-		out = append(out, encodeWindow(source, target)...)
+		out = append(out, e.encodeWindow(source, target)...)
 	}
 	return out
 }
 
 // Encode writes EncodeBytes(source, target) to out.
-func Encode(source, target []byte, out io.Writer) error {
-	_, err := out.Write(EncodeBytes(source, target))
+func (e *Encoder) Encode(source, target []byte, out io.Writer) error {
+	_, err := out.Write(e.EncodeBytes(source, target))
 	return err
+}
+
+// EncodeBytes returns a VCDIFF delta that reconstructs target from source.
+// A nil/empty source produces a self-referential ("pure compression") delta.
+func EncodeBytes(source, target []byte) []byte {
+	return new(Encoder).EncodeBytes(source, target)
+}
+
+// Encode writes EncodeBytes(source, target) to out.
+func Encode(source, target []byte, out io.Writer) error {
+	return new(Encoder).Encode(source, target, out)
 }
 
 // encodeWindow builds a single VCDIFF window covering the whole target. The
 // address space U = source ‖ target is searched with a greedy longest-match
 // hash index; matches become COPY instructions, byte runs become RUN, and the
-// rest becomes ADD literals.
-func encodeWindow(source, target []byte) []byte {
-	u := make([]byte, 0, len(source)+len(target))
-	u = append(u, source...)
-	u = append(u, target...)
+// rest becomes ADD literals. The u/head/prev buffers are reused from the
+// Encoder (grown only when a larger input needs more room).
+func (e *Encoder) encodeWindow(source, target []byte) []byte {
 	sLen := len(source)
-	n := len(u)
+	n := sLen + len(target)
+
+	if cap(e.u) < n {
+		e.u = make([]byte, n)
+	} else {
+		e.u = e.u[:n]
+	}
+	u := e.u
+	copy(u, source)
+	copy(u[sLen:], target)
 
 	// Match index, zlib-style: head[hash(seed)] is the newest position with that
 	// hash and prev[pos] chains to the previous one. This replaces a
 	// map[uint32][]int (one allocation per position) with two flat slices, which
 	// is far faster while producing identical output — chains are walked
 	// newest-first and capped at maxChain exact-seed matches, exactly as before
-	// (hash collisions are skipped via the seed comparison in findMatch).
+	// (hash collisions are skipped via the seed comparison in findMatch). head is
+	// cleared each call; prev needs no clearing since a position's prev is always
+	// written (by indexAt) before that position can appear in a chain.
 	bits := hashChainBits(n)
-	head := make([]int32, 1<<bits)
+	hsize := 1 << bits
+	if cap(e.head) < hsize {
+		e.head = make([]int32, hsize)
+	} else {
+		e.head = e.head[:hsize]
+	}
+	head := e.head
 	for i := range head {
 		head[i] = -1
 	}
-	prev := make([]int32, n)
+	if cap(e.prev) < n {
+		e.prev = make([]int32, n)
+	} else {
+		e.prev = e.prev[:n]
+	}
+	prev := e.prev
 	indexAt := func(pos int) {
 		if pos+minMatch <= n {
 			h := seedHash(binary.LittleEndian.Uint32(u[pos:pos+minMatch]), bits)

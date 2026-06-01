@@ -467,6 +467,31 @@ func TestDecodeTargetBulkCopy(t *testing.T) {
 	roundTrip(t, nil, target)
 }
 
+func TestEncoderReuse(t *testing.T) {
+	enc := NewEncoder()
+	rng := rand.New(rand.NewSource(11))
+	mk := func(n int) (src, tgt []byte) {
+		src = make([]byte, n)
+		rng.Read(src)
+		tgt = append([]byte(nil), src...)
+		copy(tgt[n/4:n/4+8], []byte("EDITEDIT"))
+		return
+	}
+	// First call allocates; the smaller follow-ups must reuse u/head/prev and
+	// still produce exactly what a fresh encoder would.
+	for _, n := range []int{8192, 512, 512} {
+		src, tgt := mk(n)
+		got := enc.EncodeBytes(src, tgt)
+		if want := EncodeBytes(src, tgt); !bytes.Equal(got, want) {
+			t.Fatalf("n=%d: reused-encoder output differs from a fresh encoder", n)
+		}
+		out, err := decodeBytes(t, src, got)
+		if err != nil || !bytes.Equal(out, tgt) {
+			t.Fatalf("n=%d: round-trip failed: %v", n, err)
+		}
+	}
+}
+
 func TestEncodeReusesSource(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
 	source := make([]byte, 8192)

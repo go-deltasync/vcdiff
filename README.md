@@ -100,6 +100,12 @@ Encode throughput is at parity with the C reference, decode is a touch faster,
 and the delta is slightly smaller — close on every axis for a pure-Go, cgo-free
 implementation. Numbers are machine-dependent and indicative.
 
+For batch workloads (encoding many pairs in one process), reuse an `Encoder` to
+amortize the per-call buffer allocation: `enc := NewEncoder()` then
+`enc.EncodeBytes(src, tgt)` in a loop. On 256 KiB pairs this is ~1.5× faster and
+allocates ~145× less per encode than the one-shot `EncodeBytes`, with identical
+output.
+
 ## License
 
 BSD-3-Clause. See [LICENSE](LICENSE).
