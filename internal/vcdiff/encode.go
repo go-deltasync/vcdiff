@@ -3,6 +3,7 @@ package vcdiff
 import (
 	"encoding/binary"
 	"io"
+	"math/bits"
 )
 
 const (
@@ -81,9 +82,10 @@ func encodeWindow(source, target []byte) []byte {
 			instS = append(instS, opcodeCOPY0(enc.mode))
 			instS = appendVarint(instS, uint64(mLen))
 			addrS = appendVarint(addrS, enc.val)
-			for q := i; q < i+mLen; q++ {
-				indexAt(q)
-			}
+			// The copied span is intentionally not re-indexed: identical content
+			// is already reachable through the source index (or the literal that
+			// first introduced it), so indexing every copied byte roughly doubles
+			// the hashing work for no practical gain in match quality.
 			i += mLen
 			litStart = i
 			continue
@@ -93,9 +95,8 @@ func encodeWindow(source, target []byte) []byte {
 			instS = append(instS, opcodeRUN0)
 			instS = appendVarint(instS, uint64(r))
 			dataS = append(dataS, u[i])
-			for q := i; q < i+r; q++ {
-				indexAt(q)
-			}
+			// A run is rediscovered by runLength directly, so the run span needs
+			// no indexing either.
 			i += r
 			litStart = i
 			continue
@@ -161,8 +162,21 @@ func matchLen(u []byte, p, i, n, sLen int) int {
 	if p < sLen {
 		limit = sLen
 	}
+	// maxL caps the comparison so a source-window match stays in the source
+	// window and neither side reads past the end of u.
+	maxL := n - i
+	if limit-p < maxL {
+		maxL = limit - p
+	}
 	l := 0
-	for i+l < n && p+l < limit && u[p+l] == u[i+l] {
+	// Compare 8 bytes at a time; the first non-zero XOR locates the mismatch.
+	for l+8 <= maxL {
+		if x := binary.LittleEndian.Uint64(u[p+l:]) ^ binary.LittleEndian.Uint64(u[i+l:]); x != 0 {
+			return l + bits.TrailingZeros64(x)/8
+		}
+		l += 8
+	}
+	for l < maxL && u[p+l] == u[i+l] {
 		l++
 	}
 	return l

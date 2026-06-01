@@ -357,6 +357,25 @@ func TestDecodeCopyFromSourceAndRun(t *testing.T) {
 	}
 }
 
+func TestDecodeCrossBoundaryCopy(t *testing.T) {
+	// A COPY that starts in the source window (addr 3 of "HELLO") and extends
+	// past its end into the target it is producing. Our encoder never emits a
+	// boundary-crossing COPY, but the decoder must still apply it byte by byte:
+	// source bytes "LO" then the freshly produced "LO" => "LOLO".
+	src := []byte("HELLO")
+	d := fullDelta(windowSpec{
+		winInd:    winSource,
+		seg:       &[2]uint64{uint64(len(src)), 0},
+		targetLen: 4,
+		inst:      []byte{opcodeCOPY0(modeSelf), 4},
+		addr:      appendVarint(nil, 3),
+	})
+	out, err := decodeBytes(t, src, d)
+	if err != nil || string(out) != "LOLO" {
+		t.Fatalf("decode = (%q, %v)", out, err)
+	}
+}
+
 func TestDecodeTargetWindowAndMultiWindow(t *testing.T) {
 	// Window 1 (no source): ADD "HELLO". Window 2 (VCD_TARGET): COPY the 5 bytes
 	// of produced target back, yielding "HELLOHELLO".
@@ -434,6 +453,18 @@ func TestEncodeSelfRepeatUsesCopy(t *testing.T) {
 	if len(delta) >= len(target)/2 {
 		t.Fatalf("delta %d not much smaller than target %d; COPY not used", len(delta), len(target))
 	}
+}
+
+func TestDecodeTargetBulkCopy(t *testing.T) {
+	// A novel block X repeated non-overlapping (separated by Y), with no source,
+	// makes the second X decode as a bulk copy from already-produced target
+	// (the a>=len(s) && a+size<=here branch in execInstruction).
+	x := []byte("ABCDEFGHIJKLMNOP")
+	y := []byte("0123456789abcdef")
+	target := append(append(append([]byte{}, x...), y...), x...)
+	// roundTrip asserts correct reconstruction; the point here is to exercise
+	// the non-overlapping target-window bulk-copy path in the decoder.
+	roundTrip(t, nil, target)
 }
 
 func TestEncodeReusesSource(t *testing.T) {

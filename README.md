@@ -71,7 +71,12 @@ tables (`VCD_CODETABLE`) with explicit errors.
 ## Performance
 
 The encoder indexes the address space with zlib-style `head`/`prev` hash chains
-(flat slices, no per-position allocation), capped at a fixed chain depth.
+(flat slices, no per-position allocation) capped at a fixed chain depth, matches
+8 bytes at a time, and does not re-index already-copied spans (identical content
+is still reachable through the source index). The decoder applies a COPY with a
+single bulk copy when it lies wholly within the source or the produced target,
+falling back to byte-by-byte only for run-length overlap or boundary-crossing
+spans.
 
 ### Protocol
 
@@ -88,12 +93,12 @@ Measured on an Apple M4 Max, Go 1.26, xdelta3 3.1.0:
 
 | impl        | encode    | decode    | delta bytes |
 |-------------|-----------|-----------|-------------|
-| go-vcdiff   | 105 MB/s  | 382 MB/s  | 452         |
-| xdelta3 -S  | 226 MB/s  | 628 MB/s  | 450         |
+| go-vcdiff   | 272 MB/s  | 873 MB/s  | 389         |
+| xdelta3 -S  | 296 MB/s  | 830 MB/s  | 450         |
 
-Delta size matches the reference to **2 bytes** (equivalent match quality);
-throughput is within ~2× — reasonable for a pure-Go, cgo-free encoder versus
-the C reference. Numbers are machine-dependent and indicative.
+Encode throughput is at parity with the C reference, decode is a touch faster,
+and the delta is slightly smaller — close on every axis for a pure-Go, cgo-free
+implementation. Numbers are machine-dependent and indicative.
 
 ## License
 

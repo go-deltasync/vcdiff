@@ -204,19 +204,32 @@ func execInstruction(t, s []byte, inst, mode byte, size int,
 		if err != nil {
 			return nil, fmt.Errorf("vcdiff: read COPY address: %w", err)
 		}
-		for k := 0; k < size; k++ {
-			x := a + k
-			var b byte
-			if x < len(s) {
-				b = s[x]
-			} else {
-				ti := x - len(s)
-				if ti >= len(t) {
-					return nil, fmt.Errorf("vcdiff: COPY address %d out of range", x)
+		switch {
+		case a+size <= len(s):
+			// Entirely within the source window: bulk copy.
+			t = append(t, s[a:a+size]...)
+		case a >= len(s) && a+size <= here:
+			// Entirely within already-produced target, no overlap: bulk copy.
+			ti := a - len(s)
+			t = append(t, t[ti:ti+size]...)
+		default:
+			// Overlapping self-reference (run-length style) or a span crossing
+			// the source/target boundary: copy byte by byte so bytes produced
+			// during this instruction become visible to it.
+			for k := 0; k < size; k++ {
+				x := a + k
+				var b byte
+				if x < len(s) {
+					b = s[x]
+				} else {
+					ti := x - len(s)
+					if ti >= len(t) {
+						return nil, fmt.Errorf("vcdiff: COPY address %d out of range", x)
+					}
+					b = t[ti]
 				}
-				b = t[ti]
+				t = append(t, b)
 			}
-			t = append(t, b)
 		}
 	}
 	return t, nil
