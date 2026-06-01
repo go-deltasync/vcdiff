@@ -41,6 +41,22 @@ vcdiff decode patch.vcdiff out.bin
 optional source (dictionary) is always read fully into memory because COPY
 instructions reference it at arbitrary offsets.
 
+## Library
+
+The package is importable for use in other Go programs (pure Go, no cgo):
+
+```go
+import "github.com/go-deltasync/vcdiff"
+
+delta := vcdiff.EncodeBytes(source, target)        // []byte
+var out bytes.Buffer
+_, err := vcdiff.Decode(source, bytes.NewReader(delta), &out) // out == target
+```
+
+`Encode(source, target, w io.Writer)` streams the delta, and `Decode` accepts any
+standard RFC 3284 delta (including those produced by xdelta3). For batch
+workloads, reuse a `vcdiff.NewEncoder()` across calls (see [Performance](#performance)).
+
 ## How it works
 
 The encoder searches the address space `U = SOURCE ‖ TARGET` with a greedy
