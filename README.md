@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/go-deltasync/brand/main/social/go-deltasync.png" alt="go-deltasync/vcdiff" width="720"></p>
+
 # vcdiff
 
 [![ci](https://github.com/go-deltasync/vcdiff/actions/workflows/ci.yml/badge.svg)](https://github.com/go-deltasync/vcdiff/actions/workflows/ci.yml)
