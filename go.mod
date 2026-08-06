@@ -1,6 +1,6 @@
 module github.com/go-deltasync/vcdiff
 
-go 1.22
+go 1.26.4
 
 require github.com/spf13/cobra v1.10.2
 
