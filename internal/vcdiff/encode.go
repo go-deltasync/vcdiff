@@ -159,7 +159,7 @@ func (e *Encoder) encodeWindow(source, target []byte) []byte {
 // small inputs. It only affects bucketing/speed, never the encoded output.
 func hashChainBits(n int) uint {
 	bits := uint(8)
-	for (1 << bits) < n && bits < 21 {
+	for (1<<bits) < n && bits < 21 {
 		bits++
 	}
 	return bits

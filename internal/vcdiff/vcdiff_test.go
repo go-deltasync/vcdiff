@@ -213,13 +213,13 @@ func TestAddressCacheEncodeModes(t *testing.T) {
 
 func TestReadHeaderErrors(t *testing.T) {
 	cases := map[string][]byte{
-		"short":        {0xD6, 0xC3},
-		"bad-magic":    {0x00, 0x00, 0x00, 0x00, 0x00},
-		"bad-version":  {0xD6, 0xC3, 0xC4, 0x99, 0x00},
-		"no-indicator": {0xD6, 0xC3, 0xC4, 0x00},
-		"decompress":   {0xD6, 0xC3, 0xC4, 0x00, hdrDecompress},
-		"codetable":    {0xD6, 0xC3, 0xC4, 0x00, hdrCodeTable},
-		"unknown-bits": {0xD6, 0xC3, 0xC4, 0x00, 0x08},
+		"short":         {0xD6, 0xC3},
+		"bad-magic":     {0x00, 0x00, 0x00, 0x00, 0x00},
+		"bad-version":   {0xD6, 0xC3, 0xC4, 0x99, 0x00},
+		"no-indicator":  {0xD6, 0xC3, 0xC4, 0x00},
+		"decompress":    {0xD6, 0xC3, 0xC4, 0x00, hdrDecompress},
+		"codetable":     {0xD6, 0xC3, 0xC4, 0x00, hdrCodeTable},
+		"unknown-bits":  {0xD6, 0xC3, 0xC4, 0x00, 0x08},
 		"appheader-len": {0xD6, 0xC3, 0xC4, 0x00, hdrAppHeader}, // missing length
 		"appheader-skip": append([]byte{0xD6, 0xC3, 0xC4, 0x00, hdrAppHeader},
 			appendVarint(nil, 10)...), // claims 10 bytes, none follow
@@ -429,7 +429,10 @@ func TestEncodeRoundTrips(t *testing.T) {
 	base := randBytes(4096)
 	edited := append(append([]byte{}, base[:1000]...), append([]byte("INSERTED CHUNK"), base[1000:]...)...)
 
-	cases := []struct{ name string; source, target []byte }{
+	cases := []struct {
+		name           string
+		source, target []byte
+	}{
 		{"identical", base, base},
 		{"edited", base, edited},
 		{"unrelated", base, randBytes(2048)},
